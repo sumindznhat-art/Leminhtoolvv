@@ -1,143 +1,98 @@
 /* ============================================================
-   SECURITY.JS v3 — BẢO MẬT ẨN HOÀN TOÀN
-   Không hiện cảnh báo, không chặn F12, tự động bảo vệ ngầm
+   SECURITY.JS v4 — CHỈ CHECK IP TỰ ĐỘNG
+   Không chặn gì, không hiện gì, chạy ngầm hoàn toàn
    ============================================================ */
 
 (function(){
   'use strict';
 
-  /* ============ 1. CHỐNG IFRAME EMBED (chống nhúng site khác) ============ */
-  try {
-    if (window.top !== window.self) {
-      window.top.location = window.self.location;
+  /* ============ 1. CHECK IP TỰ ĐỘNG KHI LOAD ============ */
+  async function autoCheckIP() {
+    try {
+      // Kiểm tra session hiện tại
+      const sessRaw = localStorage.getItem('bonsicola_session');
+      if (!sessRaw) return;
+
+      const sess = JSON.parse(sessRaw);
+      if (!sess || !sess.email) return;
+
+      // Lấy IP hiện tại
+      const currentIP = await fetchIP();
+      if (!currentIP) return;
+
+      // So sánh với IP trong session
+      const sessionIP = sess.user && sess.user.ip;
+      if (sessionIP && sessionIP !== currentIP) {
+        // IP thay đổi → ghi nhận nhưng KHÔNG đăng xuất
+        // Chỉ log ngầm (không hiện cho user)
+        console.debug('[IP-CHANGE]', sessionIP, '→', currentIP);
+      }
+
+      // Lưu IP hiện tại vào session
+      sess.currentIP = currentIP;
+      sess.lastCheckIP = Date.now();
+      localStorage.setItem('bonsicola_session', JSON.stringify(sess));
+
+    } catch(e) {
+      // Bỏ qua lỗi ngầm
     }
-  } catch(e) {}
+  }
 
-  /* ============ 2. CHỐNG VIEW SOURCE QUA URL SCHEME ============ */
-  try {
-    if (window.location.protocol === 'view-source:') {
-      window.location.href = 'about:blank';
+  /* ============ 2. LẤY IP PUBLIC ============ */
+  async function fetchIP() {
+    const apis = [
+      'https://api.ipify.org?format=json',
+      'https://api64.ipify.org?format=json',
+      'https://ipapi.co/json/'
+    ];
+
+    for (const url of apis) {
+      try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 3000);
+        const res = await fetch(url, { cache: 'no-store', signal: ctrl.signal });
+        clearTimeout(timer);
+        if (!res.ok) continue;
+        const data = await res.json();
+        const ip = data.ip || data.query || data.IPv4;
+        if (ip && typeof ip === 'string' && ip.length > 3) return ip;
+      } catch(e) {
+        continue;
+      }
     }
-  } catch(e) {}
+    return null;
+  }
 
-  /* ============ 3. ẨN SOURCE MAP (dev tools không tải được .map) ============ */
-  try {
-    Object.defineProperty(window, '__REACT_DEVTOOLS_GLOBAL_HOOK__', {
-      value: { isDisabled: true, supportsFiber: true, inject: function(){}, onCommitFiberRoot: function(){}, onCommitFiberUnmount: function(){} },
-      writable: false
-    });
-  } catch(e) {}
+  /* ============ 3. CHECK ĐỊNH KỲ MỖI 5 PHÚT ============ */
+  let checkInterval = null;
 
-  /* ============ 4. TỰ ĐỘNG ẨN CONSOLE LOG NỘI BỘ ============ */
-  try {
-    const origLog = console.log.bind(console);
-    console.log = function() {
-      // Chỉ hiện log nếu devtools đang KHÔNG mở
-      const wDiff = window.outerWidth - window.innerWidth;
-      const hDiff = window.outerHeight - window.innerHeight;
-      if (wDiff > 200 || hDiff > 200) return; // đang mở devtools → ẩn
-      return origLog.apply(console, arguments);
-    };
-  } catch(e) {}
+  function startAutoCheck() {
+    // Check ngay lần đầu (sau 2s để không ảnh hưởng load trang)
+    setTimeout(autoCheckIP, 2000);
 
-  /* ============ 5. BẢO VỆ HÀM QUAN TRỌNG KHÔNG CHO OVERRIDE ============ */
-  try {
-    const protectFns = ['openTool','doLogin','doRegister','api','saveRemoteConfig'];
-    protectFns.forEach(fn => {
-      if (typeof window[fn] === 'function') {
-        try {
-          Object.defineProperty(window, fn, {
-            writable: false,
-            configurable: false
-          });
-        } catch(e) {}
-      }
-    });
-  } catch(e) {}
+    // Check định kỳ
+    if (checkInterval) clearInterval(checkInterval);
+    checkInterval = setInterval(autoCheckIP, 5 * 60 * 1000); // 5 phút
+  }
 
-  /* ============ 6. ẨN THÔNG TIN NHẠY CẢM KHỎI CONSOLE ============ */
-  try {
-    // Xoá dấu vết trong memory
-    if (window.CONFIG && window.CONFIG.ports) {
-      // Không cho JSON.stringify in ra ports nếu bị gọi từ console
-      const origStringify = JSON.stringify;
-      JSON.stringify = function(val, ...args) {
-        if (val === window.CONFIG) {
-          return '{"protected":true}';
-        }
-        return origStringify.call(JSON, val, ...args);
-      };
+  /* ============ 4. KHỞI ĐỘNG ============ */
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', startAutoCheck);
+  } else {
+    startAutoCheck();
+  }
+
+  /* ============ 5. EXPOSE (ngầm, không quảng cáo) ============ */
+  window.IPGuard = {
+    check: autoCheckIP,
+    getIP: fetchIP,
+    lastCheck: () => {
+      try {
+        const s = localStorage.getItem('bonsicola_session');
+        if (!s) return null;
+        return JSON.parse(s).lastCheckIP || null;
+      } catch(e) { return null; }
     }
-  } catch(e) {}
-
-  /* ============ 7. BẢO VỆ LOCALSTORAGE ============ */
-  try {
-    const origGetItem = Storage.prototype.getItem;
-    Storage.prototype.getItem = function(key) {
-      // Chỉ cho phép đọc các key hợp lệ
-      const allowKeys = ['bonsicola_session','bs_current','bonsicola_avatar','bs_token','bs_inited','bs_device'];
-      if (allowKeys.includes(key)) return origGetItem.call(this, key);
-      return origGetItem.call(this, key); // Vẫn cho đọc nhưng không log
-    };
-  } catch(e) {}
-
-  /* ============ 8. CHỐNG DEBUGGER INJECT (chống paste code độc) ============ */
-  try {
-    const origEval = window.eval;
-    window.eval = function(code) {
-      if (typeof code === 'string' && code.length > 5000) {
-        console.warn('⚠️ Chặn eval code dài');
-        return;
-      }
-      return origEval.call(window, code);
-    };
-  } catch(e) {}
-
-  /* ============ 9. WATERMARK ẨN (chống chụp màn hình share) ============ */
-  try {
-    document.addEventListener('DOMContentLoaded', () => {
-      const wm = document.createElement('div');
-      wm.style.cssText = 'position:fixed;bottom:2px;left:2px;font-size:8px;color:rgba(0,0,0,.04);z-index:0;pointer-events:none;user-select:none;font-family:monospace';
-      wm.textContent = 'BONSICOLA © ' + new Date().getFullYear();
-      document.body.appendChild(wm);
-    });
-  } catch(e) {}
-
-  /* ============ 10. TỰ ĐỘNG REFRESH TOKEN SESSION ============ */
-  try {
-    setInterval(() => {
-      const s = localStorage.getItem('bonsicola_session');
-      if (s) {
-        try {
-          const obj = JSON.parse(s);
-          obj.lastPing = Date.now();
-          localStorage.setItem('bonsicola_session', JSON.stringify(obj));
-        } catch(e) {}
-      }
-    }, 60000);
-  } catch(e) {}
-
-  /* ============ 11. CHẶN CLICK PHẢI VÀO ẢNH (chống save QR/logo) ============ */
-  try {
-    document.addEventListener('contextmenu', function(e) {
-      if (e.target.tagName === 'IMG') {
-        e.preventDefault();
-        return false;
-      }
-    }, true);
-  } catch(e) {}
-
-  /* ============ 12. CHỐNG KÉO THẢ ẢNH ============ */
-  try {
-    document.addEventListener('dragstart', function(e) {
-      if (e.target.tagName === 'IMG') e.preventDefault();
-    }, true);
-  } catch(e) {}
-
-  /* ============ EXPORT ============ */
-  window.Security = {
-    version: '3.0',
-    mode: 'silent'
   };
 
 })();

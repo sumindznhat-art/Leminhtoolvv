@@ -1,16 +1,20 @@
 /* ============================================================
-   APP.JS — LOGIC CHÍNH + RENDER PORTS THEO CATEGORY
+   APP.JS — HOÀN CHỈNH
+   Load config • Render ports • Load music • Avatar • Branding
    ============================================================ */
 
 let _currentCat = 'all';
 
+/* ==================== KHỞI ĐỘNG ==================== */
 document.addEventListener('DOMContentLoaded', async () => {
   await loadRemoteConfig();
 
   const s = getSession();
-  if (s && s.user) enterApp();
-  else {
+  if (s && s.user) {
+    enterApp();
+  } else {
     applyLoginBranding();
+    applyMusic();
     const ls = document.getElementById('login-screen');
     if (ls) ls.style.display = '';
   }
@@ -24,29 +28,33 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (el) el.addEventListener('keydown', e => { if (e.key === 'Enter') doRegister(); });
   });
 
+  document.addEventListener('click', function once() {
+    const audio = document.getElementById('bgMusic');
+    if (audio && audio.src && audio.paused && window.CONFIG.music_url) {
+      audio.volume = 0.5;
+      audio.play().catch(() => {});
+    }
+    document.removeEventListener('click', once);
+  }, { once: true });
+
   startClock();
 });
 
-/* ==================== LOAD CONFIG REMOTE ==================== */
+/* ============================================================
+   LOAD CONFIG
+   ============================================================ */
 async function loadRemoteConfig() {
   try {
     const res = await api('config_get');
     if (res && res.success && res.config) {
       const remote = res.config;
-      const safeKeys = ['site_name','site_desc','marquee','bank','packages','logo','avatar','footer','support_link','music_url'];
+      const safeKeys = ['API_BASE','site_name','site_desc','marquee','footer','support_link','logo','avatar','music_url'];
       safeKeys.forEach(k => {
-        if (remote[k] !== undefined) {
-          if (k === 'bank' && remote.bank) {
-            window.CONFIG.bank = Object.assign({}, window.CONFIG.bank, remote.bank);
-          } else {
-            window.CONFIG[k] = remote[k];
-          }
-        }
+        if (remote[k] !== undefined && remote[k] !== '') window.CONFIG[k] = remote[k];
       });
-      // Ports: chỉ lấy từ server nếu có VÀ không rỗng
-      if (Array.isArray(remote.ports) && remote.ports.length > 0) {
-        window.CONFIG.ports = remote.ports;
-      }
+      if (remote.bank) window.CONFIG.bank = Object.assign({}, window.CONFIG.bank, remote.bank);
+      if (Array.isArray(remote.packages) && remote.packages.length) window.CONFIG.packages = remote.packages;
+      if (Array.isArray(remote.ports) && remote.ports.length > 0) window.CONFIG.ports = remote.ports;
     }
   } catch (e) { console.warn('Load remote config fail', e); }
 }
@@ -57,7 +65,9 @@ async function saveRemoteConfig() {
   return await api('config_save', { email: s.email, password: s.password, config: window.CONFIG });
 }
 
-/* ==================== BRANDING ==================== */
+/* ============================================================
+   BRANDING
+   ============================================================ */
 function applyLoginBranding() {
   const title = document.getElementById('loginSiteName');
   if (title && window.CONFIG.site_name) title.textContent = window.CONFIG.site_name;
@@ -67,13 +77,48 @@ function applyLoginBranding() {
   if (marquee && window.CONFIG.marquee) marquee.textContent = window.CONFIG.marquee;
   const brand = document.getElementById('hdrBrand');
   if (brand && window.CONFIG.site_name) brand.textContent = window.CONFIG.site_name;
+  const footer = document.querySelector('.login-footer');
+  if (footer && window.CONFIG.footer) footer.textContent = window.CONFIG.footer;
+  const dFoot = document.querySelector('.drawer-foot');
+  if (dFoot && window.CONFIG.footer) dFoot.textContent = window.CONFIG.footer;
+
+  /* Logo hiện trên trang login */
   if (window.CONFIG.logo) {
     const lg = document.getElementById('loginAvatarImg');
     if (lg) lg.src = window.CONFIG.logo;
   }
 }
 
-/* ==================== VÀO APP ==================== */
+/* ============================================================
+   MUSIC
+   ============================================================ */
+function applyMusic() {
+  const audio = document.getElementById('bgMusic');
+  if (!audio) return;
+  if (window.CONFIG.music_url) {
+    audio.src = window.CONFIG.music_url;
+    audio.loop = true;
+    audio.volume = 0.5;
+  } else {
+    audio.removeAttribute('src');
+    try { audio.load(); } catch(e) {}
+  }
+}
+
+/* ============================================================
+   AVATAR MẶC ĐỊNH
+   ============================================================ */
+function applyDefaultAvatar() {
+  const s = getSession();
+  if (!s || !s.user) return;
+  const u = s.user;
+  const av = u.avatar || getAvatarFromStorage() || window.CONFIG.avatar || DEFAULT_AVATAR;
+  applyAvatarEverywhere(av);
+}
+
+/* ============================================================
+   VÀO APP
+   ============================================================ */
 async function enterApp() {
   const ls = document.getElementById('login-screen'); if (ls) ls.style.display = 'none';
   const app = document.getElementById('app'); if (app) app.style.display = 'flex';
@@ -115,6 +160,7 @@ async function enterApp() {
   }
 
   applyLoginBranding();
+  applyMusic();
   buildBankInfo();
   buildPackages();
   buildCatTabs();
@@ -123,7 +169,9 @@ async function enterApp() {
   showPage('home');
 }
 
-/* ==================== ĐIỀU HƯỚNG ==================== */
+/* ============================================================
+   ĐIỀU HƯỚNG
+   ============================================================ */
 function showPage(p) {
   document.querySelectorAll('.page').forEach(x => x.classList.remove('active'));
   const el = document.getElementById('page-' + p);
@@ -134,7 +182,9 @@ function showPage(p) {
   if (p === 'deposit' || p === 'vip' || p === 'profile') renderAll();
 }
 
-/* ==================== ĐỒNG HỒ ==================== */
+/* ============================================================
+   ĐỒNG HỒ
+   ============================================================ */
 function startClock() {
   setInterval(() => {
     const d = new Date();
@@ -145,7 +195,9 @@ function startClock() {
   }, 1000);
 }
 
-/* ==================== RENDER ==================== */
+/* ============================================================
+   RENDER CHUNG
+   ============================================================ */
 function renderAll() {
   const s = getSession();
   if (!s || !s.user) return;
@@ -168,7 +220,9 @@ function renderAll() {
   const ds = document.getElementById('depStatus');      if (ds) ds.textContent = hasVip ? 'VIP đến ' + new Date(Number(u.key_expiry)).toLocaleDateString('vi-VN') : 'Chưa có key';
 }
 
-/* ==================== BANK ==================== */
+/* ============================================================
+   BANK INFO
+   ============================================================ */
 function buildBankInfo() {
   const el = document.getElementById('bankInfo');
   if (!el) return;
@@ -186,7 +240,9 @@ function buildBankInfo() {
   `;
 }
 
-/* ==================== PACKAGES ==================== */
+/* ============================================================
+   PACKAGES
+   ============================================================ */
 function buildPackages() {
   const el = document.getElementById('pkgList');
   if (!el) return;
@@ -220,7 +276,9 @@ async function buyPackage(id) {
   } else alert('❌ ' + ((res && res.error) || 'Lỗi mua gói'));
 }
 
-/* ==================== CATEGORY TABS ==================== */
+/* ============================================================
+   CATEGORY TABS
+   ============================================================ */
 function buildCatTabs() {
   const el = document.getElementById('catTabs');
   if (!el) return;
@@ -255,7 +313,9 @@ function switchCat(cat) {
   buildPorts();
 }
 
-/* ==================== RENDER PORTS ==================== */
+/* ============================================================
+   RENDER PORTS
+   ============================================================ */
 function buildPorts() {
   const el = document.getElementById('toolList');
   if (!el) return;
@@ -291,9 +351,7 @@ function buildPorts() {
     const canOpen = hasVip || t.vip == 0;
     const statusClass = canOpen && !t.maintenance ? 'ok' : '';
     const statusText = t.maintenance ? 'Bảo trì' : (canOpen ? 'Đã mở' : 'Cần VIP');
-
-    const kindIcon = t.kind === 'panel' ? 'fa-chart-line' :
-                     (t.kind === 'baccarat' ? 'fa-diamond' : 'fa-gamepad');
+    const kindIcon = t.kind === 'panel' ? 'fa-chart-line' : (t.kind === 'baccarat' ? 'fa-diamond' : 'fa-gamepad');
 
     return `
       <div class="tool-card ${t.maintenance ? 'disabled' : ''}" onclick="openTool('${t.slug}')">
@@ -327,14 +385,18 @@ function buildPorts() {
   }).join('');
 }
 
-/* ==================== NẠP TIỀN ==================== */
+/* ============================================================
+   NẠP TIỀN
+   ============================================================ */
 function openDepositModal() {
   const a = document.getElementById('depAmount'); if (a) a.value = '';
   const n = document.getElementById('depNote');   if (n) n.value = '';
   openModal('depositModal');
 }
 
-/* ==================== LỊCH SỬ ==================== */
+/* ============================================================
+   LỊCH SỬ
+   ============================================================ */
 async function openHistoryDeposit() {
   const s = getSession();
   if (!s) return;
@@ -378,7 +440,9 @@ async function openHistoryKey() {
   openModal('historyModal');
 }
 
-/* ==================== MODAL ==================== */
+/* ============================================================
+   MODAL
+   ============================================================ */
 function openModal(id)  { const el = document.getElementById(id); if (el) el.classList.add('show'); }
 function closeModal(id) { const el = document.getElementById(id); if (el) el.classList.remove('show'); }
 
@@ -412,7 +476,9 @@ function resetAvatar() {
   if (status) status.textContent = '✅ Đã reset';
 }
 
-/* ==================== DRAWER ==================== */
+/* ============================================================
+   DRAWER
+   ============================================================ */
 function openDrawer() {
   const d = document.getElementById('drawer'); if (d) d.classList.add('show');
   const m = document.getElementById('drawerMask'); if (m) m.classList.add('show');
@@ -422,17 +488,32 @@ function closeDrawer() {
   const m = document.getElementById('drawerMask'); if (m) m.classList.remove('show');
 }
 
-/* ==================== MUSIC ==================== */
+/* ============================================================
+   MUSIC BUTTON
+   ============================================================ */
 let _musicOn = false;
 function toggleMusic() {
-  _musicOn = !_musicOn;
+  const audio = document.getElementById('bgMusic');
   const btn = document.getElementById('musicBtn');
-  if (btn) btn.innerHTML = _musicOn
-    ? '<i class="fa-solid fa-volume-high"></i>'
-    : '<i class="fa-solid fa-volume-xmark"></i>';
+  if (!audio || !window.CONFIG.music_url) {
+    if (btn) btn.innerHTML = '<i class="fa-solid fa-volume-xmark"></i>';
+    return alert('Chưa cấu hình nhạc nền!');
+  }
+  if (_musicOn) {
+    audio.pause();
+    _musicOn = false;
+    if (btn) btn.innerHTML = '<i class="fa-solid fa-volume-xmark"></i>';
+  } else {
+    audio.volume = 0.5;
+    audio.play().catch(() => {});
+    _musicOn = true;
+    if (btn) btn.innerHTML = '<i class="fa-solid fa-volume-high"></i>';
+  }
 }
 
-/* ==================== EXPOSE ==================== */
+/* ============================================================
+   EXPOSE TO WINDOW
+   ============================================================ */
 window.enterApp = enterApp;
 window.showPage = showPage;
 window.renderAll = renderAll;
@@ -457,3 +538,5 @@ window.switchCat = switchCat;
 window.buildBankInfo = buildBankInfo;
 window.buildPackages = buildPackages;
 window.applyLoginBranding = applyLoginBranding;
+window.applyMusic = applyMusic;
+window.applyDefaultAvatar = applyDefaultAvatar;

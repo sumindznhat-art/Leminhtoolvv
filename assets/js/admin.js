@@ -1,6 +1,6 @@
 /* ============================================================
-   ADMIN.JS — QUẢN TRỊ TOÀN DIỆN
-   Duyệt tiền • Users • Tools/Ports • Config • Keys • History
+   ADMIN.JS — HOÀN CHỈNH
+   Duyệt tiền • Users • Tools • Config (Ảnh/QR/Logo/Nhạc) • Keys
    ============================================================ */
 
 /* ==================== MỞ ADMIN PANEL ==================== */
@@ -93,12 +93,10 @@ async function approveDeposit(id) {
   const s = getSession();
   const res = await api('deposit_approve', { email: s.email, password: s.password, id });
   if (res && res.success) {
-    alert('✅ Đã duyệt! Số dư mới của user: ' + fmt(res.new_balance));
+    alert('✅ Đã duyệt! Số dư mới: ' + fmt(res.new_balance));
     await renderAdminPending();
     await renderAdminUsers();
-  } else {
-    alert('❌ ' + ((res && res.error) || 'Lỗi duyệt tiền'));
-  }
+  } else alert('❌ ' + ((res && res.error) || 'Lỗi duyệt tiền'));
 }
 
 async function rejectDeposit(id) {
@@ -109,9 +107,7 @@ async function rejectDeposit(id) {
   if (res && res.success) {
     alert('❌ Đã từ chối');
     await renderAdminPending();
-  } else {
-    alert('❌ ' + ((res && res.error) || 'Lỗi'));
-  }
+  } else alert('❌ ' + ((res && res.error) || 'Lỗi'));
 }
 
 /* ============================================================
@@ -133,8 +129,7 @@ async function renderAdminUsers() {
 
   list.forEach(u => {
     const exp = u.key_expiry && Number(u.key_expiry) > 0
-      ? new Date(Number(u.key_expiry)).toLocaleDateString('vi-VN')
-      : '—';
+      ? new Date(Number(u.key_expiry)).toLocaleDateString('vi-VN') : '—';
     const isAdm = u.is_admin == 1;
     const balance = Number(u.balance) || 0;
 
@@ -150,7 +145,7 @@ async function renderAdminUsers() {
         <div class="info">⏰ Hạn VIP: ${exp}</div>
         <div class="acts">
           <button class="b3" onclick="adminResetIP('${esc(u.email)}')">🔄 Reset IP</button>
-          <button class="b4" onclick="adminAdjustBalance('${esc(u.email)}', ${balance})">💵 Cộng/Trừ tiền</button>
+          <button class="b4" onclick="adminAdjustBalance('${esc(u.email)}', ${balance})">💵 Cộng/Trừ</button>
           ${!isAdm ? `<button class="b5" onclick="adminDeleteUser('${esc(u.email)}')">🗑 Xoá</button>` : ''}
         </div>
       </div>`;
@@ -159,15 +154,13 @@ async function renderAdminUsers() {
 }
 
 async function adminResetIP(email) {
-  if (!confirm('Reset IP cho ' + email + '?\nUser sẽ phải đăng nhập lại và khoá vào IP mới.')) return;
+  if (!confirm('Reset IP cho ' + email + '?')) return;
   const s = getSession();
   const res = await api('user_reset_ip', { email: s.email, password: s.password, user_email: email });
   if (res && res.success) {
     alert('✅ Đã reset IP cho ' + email);
     await renderAdminUsers();
-  } else {
-    alert('❌ ' + ((res && res.error) || 'Lỗi'));
-  }
+  } else alert('❌ ' + ((res && res.error) || 'Lỗi'));
 }
 
 async function adminAdjustBalance(email, currentBal) {
@@ -179,17 +172,13 @@ async function adminAdjustBalance(email, currentBal) {
 
   const s = getSession();
   const res = await api('user_update', {
-    email: s.email,
-    password: s.password,
-    user_email: email,
-    balance: newBal
+    email: s.email, password: s.password,
+    user_email: email, balance: newBal
   });
   if (res && res.success) {
     alert('✅ Đã cập nhật số dư: ' + fmt(newBal));
     await renderAdminUsers();
-  } else {
-    alert('❌ ' + ((res && res.error) || 'Lỗi'));
-  }
+  } else alert('❌ ' + ((res && res.error) || 'Lỗi'));
 }
 
 async function adminDeleteUser(email) {
@@ -199,95 +188,150 @@ async function adminDeleteUser(email) {
   if (res && res.success) {
     alert('✅ Đã xoá user');
     await renderAdminUsers();
-  } else {
-    alert('❌ ' + ((res && res.error) || 'Lỗi'));
-  }
+  } else alert('❌ ' + ((res && res.error) || 'Lỗi'));
 }
 
 /* ============================================================
-   3. QUẢN LÝ TOOLS / PORTS
+   3. QUẢN LÝ TOOLS + CẤU HÌNH (ẢNH/QR/LOGO/NHẠC)
    ============================================================ */
 async function renderAdminTools() {
   const el = document.getElementById('adminToolsView'); if (!el) return;
   const ports = window.CONFIG.ports || [];
+  const bank = window.CONFIG.bank || {};
+  const logo = window.CONFIG.logo || '';
+  const avatar = window.CONFIG.avatar || '';
 
   let html = `
+    <!-- ============ CẤU HÌNH CHUNG ============ -->
+    <div class="adm-section" style="border-color:#93c5fd;background:#eff6ff">
+      <h4>⚙️ CẤU HÌNH CHUNG</h4>
+
+      <label style="font-size:11px;font-weight:700">🌐 API Base URL</label>
+      <input class="adm-input" id="cfgApiBase" value="${esc(window.CONFIG.API_BASE || '/api')}" placeholder="VD: /api hoặc https://domain.com/api">
+
+      <label style="font-size:11px;font-weight:700">📝 Tên Site</label>
+      <input class="adm-input" id="cfgSiteName" value="${esc(window.CONFIG.site_name || '')}">
+
+      <label style="font-size:11px;font-weight:700">📄 Mô tả</label>
+      <input class="adm-input" id="cfgSiteDesc" value="${esc(window.CONFIG.site_desc || '')}">
+
+      <label style="font-size:11px;font-weight:700">📢 Chữ chạy</label>
+      <input class="adm-input" id="cfgMarquee" value="${esc(window.CONFIG.marquee || '')}">
+
+      <label style="font-size:11px;font-weight:700">© Footer</label>
+      <input class="adm-input" id="cfgFooter" value="${esc(window.CONFIG.footer || '')}">
+
+      <!-- LOGO -->
+      <div style="background:#fff;border-radius:10px;padding:10px;margin-top:10px;border:1px solid #bfdbfe">
+        <div style="font-size:12px;font-weight:800;color:#1e40af;margin-bottom:8px">🖼️ ẢNH LOGO</div>
+        <div style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">
+          <div id="cfgLogoPreview" style="width:70px;height:70px;border-radius:50%;background:#f1f5f9;display:flex;align-items:center;justify-content:center;overflow:hidden;border:2px solid #cbd5e1;flex-shrink:0;font-size:28px">
+            ${logo ? `<img src="${logo}" style="width:100%;height:100%;object-fit:cover">` : '🎀'}
+          </div>
+          <div style="flex:1;min-width:180px">
+            <label style="font-size:10px;font-weight:700;display:block;margin-bottom:3px">📤 Upload file</label>
+            <input type="file" id="cfgLogoFile" accept="image/*" class="adm-input" style="padding:5px;margin-bottom:5px;font-size:11px">
+            <label style="font-size:10px;font-weight:700;display:block;margin-bottom:3px">🔗 Hoặc dán URL</label>
+            <input class="adm-input" id="cfgLogoUrl" value="${logo && !logo.startsWith('data:') ? esc(logo) : ''}" placeholder="https://.../logo.png" style="font-size:11px">
+            <button class="adm-btn" style="padding:5px;font-size:10px;margin-top:5px;background:#ef4444" onclick="clearLogo()">🗑 Xoá logo</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- AVATAR -->
+      <div style="background:#fff;border-radius:10px;padding:10px;margin-top:10px;border:1px solid #bfdbfe">
+        <div style="font-size:12px;font-weight:800;color:#1e40af;margin-bottom:8px">👤 AVATAR MẶC ĐỊNH</div>
+        <div style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">
+          <div id="cfgAvatarPreview" style="width:70px;height:70px;border-radius:50%;background:#f1f5f9;display:flex;align-items:center;justify-content:center;overflow:hidden;border:2px solid #cbd5e1;flex-shrink:0;font-size:28px">
+            ${avatar ? `<img src="${avatar}" style="width:100%;height:100%;object-fit:cover">` : '🎀'}
+          </div>
+          <div style="flex:1;min-width:180px">
+            <label style="font-size:10px;font-weight:700;display:block;margin-bottom:3px">📤 Upload file</label>
+            <input type="file" id="cfgAvatarFile" accept="image/*" class="adm-input" style="padding:5px;margin-bottom:5px;font-size:11px">
+            <label style="font-size:10px;font-weight:700;display:block;margin-bottom:3px">🔗 Hoặc dán URL</label>
+            <input class="adm-input" id="cfgAvatarUrl" value="${avatar && !avatar.startsWith('data:') ? esc(avatar) : ''}" placeholder="https://.../avatar.png" style="font-size:11px">
+            <button class="adm-btn" style="padding:5px;font-size:10px;margin-top:5px;background:#ef4444" onclick="clearAvatar()">🗑 Xoá avatar</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- NHẠC -->
+      <div style="background:#fff;border-radius:10px;padding:10px;margin-top:10px;border:1px solid #bfdbfe">
+        <div style="font-size:12px;font-weight:800;color:#1e40af;margin-bottom:8px">🎵 NHẠC NỀN</div>
+        <label style="font-size:10px;font-weight:700;display:block;margin-bottom:3px">🔗 URL file nhạc (.mp3)</label>
+        <input class="adm-input" id="cfgMusicUrl" value="${esc(window.CONFIG.music_url || '')}" placeholder="https://.../music.mp3">
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <button class="adm-btn" style="padding:6px;font-size:11px;background:linear-gradient(135deg,#10b981,#059669);flex:1" onclick="testMusic()">▶️ Nghe thử</button>
+          <button class="adm-btn" style="padding:6px;font-size:11px;background:#ef4444;flex:1" onclick="clearMusic()">🗑 Xoá nhạc</button>
+        </div>
+      </div>
+
+      <!-- NGÂN HÀNG + QR -->
+      <div style="background:#fff;border-radius:10px;padding:10px;margin-top:10px;border:1px solid #bfdbfe">
+        <div style="font-size:12px;font-weight:800;color:#1e40af;margin-bottom:8px">🏦 NGÂN HÀNG + QR</div>
+        <label style="font-size:11px;font-weight:700">Tên ngân hàng</label>
+        <input class="adm-input" id="cfgBankName" value="${esc(bank.name || '')}">
+        <label style="font-size:11px;font-weight:700">Số tài khoản</label>
+        <input class="adm-input" id="cfgBankAcc" value="${esc(bank.account || '')}">
+        <label style="font-size:11px;font-weight:700">Chủ tài khoản</label>
+        <input class="adm-input" id="cfgBankOwner" value="${esc(bank.owner || '')}">
+
+        <div style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap;margin-top:8px">
+          <div id="cfgQRPreview" style="width:90px;height:90px;border-radius:8px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;overflow:hidden;border:2px solid #cbd5e1;flex-shrink:0;font-size:28px">
+            ${bank.qr ? `<img src="${bank.qr}" style="width:100%;height:100%;object-fit:contain">` : '📱'}
+          </div>
+          <div style="flex:1;min-width:180px">
+            <label style="font-size:10px;font-weight:700;display:block;margin-bottom:3px">📤 Upload ảnh QR</label>
+            <input type="file" id="cfgQRFile" accept="image/*" class="adm-input" style="padding:5px;margin-bottom:5px;font-size:11px">
+            <label style="font-size:10px;font-weight:700;display:block;margin-bottom:3px">🔗 Hoặc dán URL QR</label>
+            <input class="adm-input" id="cfgQRUrl" value="${bank.qr && !bank.qr.startsWith('data:') ? esc(bank.qr) : ''}" placeholder="https://.../qr.png" style="font-size:11px">
+            <button class="adm-btn" style="padding:5px;font-size:10px;margin-top:5px;background:#ef4444" onclick="clearQR()">🗑 Xoá QR</button>
+          </div>
+        </div>
+      </div>
+
+      <button class="adm-btn" style="background:linear-gradient(135deg,#22c55e,#16a34a);margin-top:12px;padding:14px;font-size:14px" onclick="saveSiteConfig()">💾 LƯU TOÀN BỘ CẤU HÌNH</button>
+    </div>
+
+    <!-- ============ THÊM TOOL MỚI ============ -->
     <div class="adm-section">
-      <h4>➕ Thêm Game / Tool mới</h4>
-      <label style="font-size:12px;font-weight:700">Tên tool *</label>
+      <h4>➕ THÊM GAME / TOOL MỚI</h4>
+      <label style="font-size:11px;font-weight:700">Tên tool *</label>
       <input class="adm-input" id="ntName" placeholder="VD: Sunwin Tài Xỉu">
       
-      <label style="font-size:12px;font-weight:700">Danh mục *</label>
+      <label style="font-size:11px;font-weight:700">Danh mục *</label>
       <select class="adm-input" id="ntCat">
         <option value="taixiu">🎲 Tài Xỉu</option>
         <option value="sicbo">🎰 Sicbo</option>
         <option value="baccarat">🃏 Baccarat</option>
       </select>
       
-      <label style="font-size:12px;font-weight:700">Loại *</label>
+      <label style="font-size:11px;font-weight:700">Loại *</label>
       <select class="adm-input" id="ntKind">
-        <option value="view">👁 View (vào game + panel AI)</option>
-        <option value="panel">📊 Panel (chỉ panel AI, không vào game)</option>
-        <option value="baccarat">🃏 Baccarat (đặc biệt)</option>
+        <option value="view">👁 View (vào game + panel)</option>
+        <option value="panel">📊 Panel (chỉ panel AI)</option>
+        <option value="baccarat">🃏 Baccarat</option>
       </select>
       
-      <label style="font-size:12px;font-weight:700">URL Game</label>
-      <input class="adm-input" id="ntGameUrl" placeholder="https://... (để trống nếu kind=panel)">
+      <label style="font-size:11px;font-weight:700">URL Game</label>
+      <input class="adm-input" id="ntGameUrl" placeholder="https://...">
       
-      <label style="font-size:12px;font-weight:700">API URL * (để phân tích)</label>
-      <input class="adm-input" id="ntApiUrl" placeholder="https://api.../sessions">
+      <label style="font-size:11px;font-weight:700">API URL *</label>
+      <input class="adm-input" id="ntApiUrl" placeholder="https://.../sessions">
       
-      <label style="font-size:12px;font-weight:700">Thứ tự (sort)</label>
+      <label style="font-size:11px;font-weight:700">Thứ tự</label>
       <input class="adm-input" id="ntSort" type="number" value="99">
       
-      <label style="font-size:12px;font-weight:700">Ảnh đại diện</label>
-      <input type="file" id="ntImage" accept="image/*" class="adm-input" style="padding:6px">
+      <label style="font-size:11px;font-weight:700">Ảnh đại diện</label>
+      <input type="file" id="ntImage" accept="image/*" class="adm-input" style="padding:5px">
       
       <div style="display:flex;gap:14px;margin:10px 0;flex-wrap:wrap">
-        <label style="font-size:12px;font-weight:700;display:flex;align-items:center;gap:5px">
-          <input type="checkbox" id="ntHot"> 🔥 HOT
-        </label>
-        <label style="font-size:12px;font-weight:700;display:flex;align-items:center;gap:5px">
-          <input type="checkbox" id="ntNew"> ✨ NEW
-        </label>
-        <label style="font-size:12px;font-weight:700;display:flex;align-items:center;gap:5px">
-          <input type="checkbox" id="ntVip" checked> 👑 VIP
-        </label>
+        <label style="font-size:12px;font-weight:700"><input type="checkbox" id="ntHot"> 🔥 HOT</label>
+        <label style="font-size:12px;font-weight:700"><input type="checkbox" id="ntNew"> ✨ NEW</label>
+        <label style="font-size:12px;font-weight:700"><input type="checkbox" id="ntVip" checked> 👑 VIP</label>
       </div>
       
       <button class="adm-btn" style="background:linear-gradient(135deg,#22c55e,#16a34a)" onclick="addNewTool()">➕ THÊM TOOL</button>
-    </div>
-
-    <div class="adm-section" style="border-color:#fecdd3">
-      <h4>⚙️ Cấu hình chung Site</h4>
-      
-      <label style="font-size:12px;font-weight:700">Tên Site</label>
-      <input class="adm-input" id="cfgSiteName" value="${esc(window.CONFIG.site_name || '')}">
-      
-      <label style="font-size:12px;font-weight:700">Mô tả</label>
-      <input class="adm-input" id="cfgSiteDesc" value="${esc(window.CONFIG.site_desc || '')}">
-      
-      <label style="font-size:12px;font-weight:700">Chữ chạy (Marquee)</label>
-      <input class="adm-input" id="cfgMarquee" value="${esc(window.CONFIG.marquee || '')}">
-      
-      <label style="font-size:12px;font-weight:700">Tên ngân hàng</label>
-      <input class="adm-input" id="cfgBankName" value="${esc((window.CONFIG.bank && window.CONFIG.bank.name) || '')}">
-      
-      <label style="font-size:12px;font-weight:700">Số tài khoản</label>
-      <input class="adm-input" id="cfgBankAcc" value="${esc((window.CONFIG.bank && window.CONFIG.bank.account) || '')}">
-      
-      <label style="font-size:12px;font-weight:700">Chủ tài khoản</label>
-      <input class="adm-input" id="cfgBankOwner" value="${esc((window.CONFIG.bank && window.CONFIG.bank.owner) || '')}">
-      
-      <label style="font-size:12px;font-weight:700">Ảnh QR ngân hàng</label>
-      <input type="file" id="cfgQRFile" accept="image/*" class="adm-input" style="padding:6px">
-      ${(window.CONFIG.bank && window.CONFIG.bank.qr) ? `<div style="text-align:center;margin-top:6px"><img src="${window.CONFIG.bank.qr}" style="max-width:120px;border-radius:8px;border:1px solid #e2e8f0"></div>` : ''}
-      
-      <label style="font-size:12px;font-weight:700;display:block;margin-top:10px">Logo / Avatar mặc định</label>
-      <input type="file" id="cfgLogoFile" accept="image/*" class="adm-input" style="padding:6px">
-      ${window.CONFIG.logo ? `<div style="text-align:center;margin-top:6px"><img src="${window.CONFIG.logo}" style="max-width:80px;border-radius:50%;border:2px solid #e2e8f0"></div>` : ''}
-      
-      <button class="adm-btn" style="background:linear-gradient(135deg,#22c55e,#16a34a);margin-top:10px" onclick="saveSiteConfig()">💾 LƯU CẤU HÌNH</button>
     </div>
 
     <p style="text-align:center;font-size:12px;color:#64748b;margin:14px 0 8px">📦 Tổng: <b>${ports.length}</b> tool</p>
@@ -309,9 +353,7 @@ async function renderAdminTools() {
         <div class="adm-row" style="${t.maintenance == 1 ? 'opacity:.65' : ''}">
           <div style="display:flex;gap:10px;align-items:center">
             <div style="width:44px;height:44px;border-radius:10px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0">
-              ${img
-                ? `<img src="${img}" style="width:100%;height:100%;object-fit:cover" onerror="this.style.display='none';this.parentNode.innerHTML='<i class=\\'fa-solid fa-cube\\' style=\\'color:#a855f7\\'></i>'">`
-                : `<i class="fa-solid fa-cube" style="color:#a855f7"></i>`}
+              ${img ? `<img src="${img}" style="width:100%;height:100%;object-fit:cover">` : `<i class="fa-solid fa-cube" style="color:#a855f7"></i>`}
             </div>
             <div style="flex:1;min-width:0">
               <div style="font-weight:800;font-size:13px">${esc(t.name)} ${badges.join(' ')}</div>
@@ -330,6 +372,144 @@ async function renderAdminTools() {
   el.innerHTML = html;
 }
 
+/* ============================================================
+   LƯU CẤU HÌNH TOÀN BỘ
+   ============================================================ */
+async function saveSiteConfig() {
+  const val = id => {
+    const el = document.getElementById(id);
+    return el ? el.value.trim() : '';
+  };
+
+  const apiBase = val('cfgApiBase');
+  if (apiBase) window.CONFIG.API_BASE = apiBase;
+
+  window.CONFIG.site_name = val('cfgSiteName') || 'TOOL MINHIOS';
+  window.CONFIG.site_desc = val('cfgSiteDesc');
+  window.CONFIG.marquee = val('cfgMarquee');
+  window.CONFIG.footer = val('cfgFooter');
+
+  /* Logo */
+  const logoFile = document.getElementById('cfgLogoFile').files[0];
+  if (logoFile) {
+    const b64 = await fileToBase64(logoFile);
+    if (b64) window.CONFIG.logo = b64;
+  } else {
+    const logoUrl = val('cfgLogoUrl');
+    if (logoUrl) window.CONFIG.logo = logoUrl;
+  }
+
+  /* Avatar */
+  const avatarFile = document.getElementById('cfgAvatarFile').files[0];
+  if (avatarFile) {
+    const b64 = await fileToBase64(avatarFile);
+    if (b64) window.CONFIG.avatar = b64;
+  } else {
+    const avatarUrl = val('cfgAvatarUrl');
+    if (avatarUrl) window.CONFIG.avatar = avatarUrl;
+  }
+
+  /* Music */
+  window.CONFIG.music_url = val('cfgMusicUrl');
+
+  /* Bank */
+  window.CONFIG.bank = window.CONFIG.bank || {};
+  window.CONFIG.bank.name = val('cfgBankName');
+  window.CONFIG.bank.account = val('cfgBankAcc');
+  window.CONFIG.bank.owner = val('cfgBankOwner');
+
+  /* QR */
+  const qrFile = document.getElementById('cfgQRFile').files[0];
+  if (qrFile) {
+    const b64 = await fileToBase64(qrFile);
+    if (b64) window.CONFIG.bank.qr = b64;
+  } else {
+    const qrUrl = val('cfgQRUrl');
+    if (qrUrl) window.CONFIG.bank.qr = qrUrl;
+  }
+
+  const res = await saveRemoteConfig();
+  if (res && res.success) {
+    alert('✅ ĐÃ LƯU TOÀN BỘ CẤU HÌNH!');
+    if (typeof applyLoginBranding === 'function') applyLoginBranding();
+    if (typeof buildBankInfo === 'function') buildBankInfo();
+    if (typeof applyMusic === 'function') applyMusic();
+    if (typeof applyDefaultAvatar === 'function') applyDefaultAvatar();
+    renderAdminTools();
+  } else {
+    alert('❌ ' + ((res && res.error) || 'Lỗi lưu cấu hình'));
+  }
+}
+
+/* ============================================================
+   XOÁ ẢNH / NHẠC / QR
+   ============================================================ */
+async function clearLogo() {
+  if (!confirm('Xoá logo?')) return;
+  window.CONFIG.logo = '';
+  const res = await saveRemoteConfig();
+  if (res && res.success) {
+    if (typeof applyLoginBranding === 'function') applyLoginBranding();
+    renderAdminTools();
+    alert('✅ Đã xoá logo');
+  }
+}
+
+async function clearAvatar() {
+  if (!confirm('Xoá avatar mặc định?')) return;
+  window.CONFIG.avatar = '';
+  const res = await saveRemoteConfig();
+  if (res && res.success) {
+    if (typeof applyDefaultAvatar === 'function') applyDefaultAvatar();
+    renderAdminTools();
+    alert('✅ Đã xoá avatar');
+  }
+}
+
+async function clearQR() {
+  if (!confirm('Xoá QR ngân hàng?')) return;
+  window.CONFIG.bank = window.CONFIG.bank || {};
+  window.CONFIG.bank.qr = '';
+  const res = await saveRemoteConfig();
+  if (res && res.success) {
+    if (typeof buildBankInfo === 'function') buildBankInfo();
+    renderAdminTools();
+    alert('✅ Đã xoá QR');
+  }
+}
+
+async function clearMusic() {
+  if (!confirm('Xoá nhạc nền?')) return;
+  window.CONFIG.music_url = '';
+  const res = await saveRemoteConfig();
+  if (res && res.success) {
+    if (typeof applyMusic === 'function') applyMusic();
+    renderAdminTools();
+    alert('✅ Đã xoá nhạc');
+  }
+}
+
+/* ============================================================
+   TEST NHẠC
+   ============================================================ */
+function testMusic() {
+  const url = (document.getElementById('cfgMusicUrl') || {}).value?.trim();
+  if (!url) return alert('Chưa nhập URL nhạc!');
+  const audio = new Audio(url);
+  audio.volume = 0.5;
+  audio.play()
+    .then(() => {
+      alert('▶️ Đang phát thử nhạc (10 giây)...');
+      setTimeout(() => { audio.pause(); audio.currentTime = 0; }, 10000);
+    })
+    .catch(e => {
+      alert('❌ Không phát được nhạc!\n\n' + e.message);
+    });
+}
+
+/* ============================================================
+   TOOLS CRUD
+   ============================================================ */
 async function addNewTool() {
   const name = (document.getElementById('ntName') || {}).value?.trim();
   const cat = (document.getElementById('ntCat') || {}).value || 'taixiu';
@@ -339,7 +519,6 @@ async function addNewTool() {
   const sort = parseInt((document.getElementById('ntSort') || {}).value) || 99;
 
   if (!name) return alert('⚠️ Nhập tên tool!');
-  if (!apiUrl && kind !== 'view') return alert('⚠️ Nhập API URL!');
 
   let image = '';
   const f = document.getElementById('ntImage').files[0];
@@ -373,7 +552,7 @@ async function addNewTool() {
     if (typeof buildCatTabs === 'function') buildCatTabs();
     if (typeof buildPorts === 'function') buildPorts();
   } else {
-    alert('❌ ' + ((res && res.error) || 'Lỗi lưu lên server'));
+    alert('❌ ' + ((res && res.error) || 'Lỗi'));
     window.CONFIG.ports.pop();
   }
 }
@@ -381,17 +560,12 @@ async function addNewTool() {
 async function editTool(idx) {
   const t = window.CONFIG.ports[idx];
   if (!t) return;
+  const name = prompt('Tên tool:', t.name); if (name === null) return;
+  const gameUrl = prompt('URL Game:', t.game_url || ''); if (gameUrl === null) return;
+  const apiUrl = prompt('API URL:', t.api_url || ''); if (apiUrl === null) return;
+  const sortStr = prompt('Thứ tự (sort):', t.sort || 99); if (sortStr === null) return;
 
-  const name = prompt('Tên tool:', t.name);
-  if (name === null) return;
-  const gameUrl = prompt('URL Game:', t.game_url || '');
-  if (gameUrl === null) return;
-  const apiUrl = prompt('API URL:', t.api_url || '');
-  if (apiUrl === null) return;
-  const sortStr = prompt('Thứ tự (sort):', t.sort || 99);
-  if (sortStr === null) return;
-
-  const oldVals = { name: t.name, game_url: t.game_url, api_url: t.api_url, sort: t.sort };
+  const old = { name: t.name, game_url: t.game_url, api_url: t.api_url, sort: t.sort };
   t.name = name.trim() || t.name;
   t.game_url = gameUrl.trim();
   t.api_url = apiUrl.trim();
@@ -403,7 +577,7 @@ async function editTool(idx) {
     renderAdminTools();
     if (typeof buildPorts === 'function') buildPorts();
   } else {
-    Object.assign(t, oldVals);
+    Object.assign(t, old);
     alert('❌ ' + ((res && res.error) || 'Lỗi'));
   }
 }
@@ -443,50 +617,7 @@ async function deleteTool(idx) {
 }
 
 /* ============================================================
-   4. LƯU CẤU HÌNH SITE + BANK + LOGO
-   ============================================================ */
-async function saveSiteConfig() {
-  const get = id => {
-    const el = document.getElementById(id);
-    return el ? el.value.trim() : '';
-  };
-
-  window.CONFIG.site_name = get('cfgSiteName') || 'TOOL BONSICOLA';
-  window.CONFIG.site_desc = get('cfgSiteDesc');
-  window.CONFIG.marquee = get('cfgMarquee');
-
-  window.CONFIG.bank = window.CONFIG.bank || {};
-  window.CONFIG.bank.name = get('cfgBankName');
-  window.CONFIG.bank.account = get('cfgBankAcc');
-  window.CONFIG.bank.owner = get('cfgBankOwner');
-
-  // Upload QR
-  const qrF = document.getElementById('cfgQRFile')?.files[0];
-  if (qrF) {
-    const qr = await fileToBase64(qrF);
-    if (qr) window.CONFIG.bank.qr = qr;
-  }
-
-  // Upload Logo
-  const logoF = document.getElementById('cfgLogoFile')?.files[0];
-  if (logoF) {
-    const logo = await fileToBase64(logoF);
-    if (logo) window.CONFIG.logo = logo;
-  }
-
-  const res = await saveRemoteConfig();
-  if (res && res.success) {
-    alert('✅ Đã lưu cấu hình!');
-    if (typeof applyLoginBranding === 'function') applyLoginBranding();
-    if (typeof buildBankInfo === 'function') buildBankInfo();
-    renderAdminTools();
-  } else {
-    alert('❌ ' + ((res && res.error) || 'Lỗi lưu cấu hình'));
-  }
-}
-
-/* ============================================================
-   5. QUẢN LÝ KEYS
+   4. KEYS
    ============================================================ */
 async function renderAdminKeys() {
   const s = getSession(); if (!s) return;
@@ -498,15 +629,14 @@ async function renderAdminKeys() {
   let html = `
     <div class="adm-section">
       <h4>🔑 Tạo Key mới</h4>
-      <label style="font-size:12px;font-weight:700">Số ngày</label>
+      <label style="font-size:11px;font-weight:700">Số ngày</label>
       <input class="adm-input" id="keyDays" type="number" value="30" min="1">
-      <label style="font-size:12px;font-weight:700">Số lượng</label>
+      <label style="font-size:11px;font-weight:700">Số lượng</label>
       <input class="adm-input" id="keyQty" type="number" value="1" min="1" max="100">
-      <label style="font-size:12px;font-weight:700">Ghi chú</label>
+      <label style="font-size:11px;font-weight:700">Ghi chú</label>
       <input class="adm-input" id="keyNote" placeholder="VD: Tặng khách VIP">
       <button class="adm-btn" style="background:linear-gradient(135deg,#22c55e,#16a34a)" onclick="adminGenKeys()">➕ TẠO KEY</button>
     </div>
-
     <p style="text-align:center;font-size:12px;color:#64748b;margin:14px 0 8px">📦 Tổng: <b>${keys.length}</b> key</p>
   `;
 
@@ -545,9 +675,7 @@ async function adminGenKeys() {
   if (res && res.success) {
     alert('✅ Đã tạo ' + (res.keys || []).length + ' key:\n\n' + (res.keys || []).join('\n'));
     renderAdminKeys();
-  } else {
-    alert('❌ ' + ((res && res.error) || 'Lỗi tạo key'));
-  }
+  } else alert('❌ ' + ((res && res.error) || 'Lỗi'));
 }
 
 async function adminDelKey(code) {
@@ -557,13 +685,11 @@ async function adminDelKey(code) {
   if (res && res.success) {
     alert('✅ Đã xoá');
     renderAdminKeys();
-  } else {
-    alert('❌ ' + ((res && res.error) || 'Lỗi'));
-  }
+  } else alert('❌ ' + ((res && res.error) || 'Lỗi'));
 }
 
 /* ============================================================
-   6. LỊCH SỬ
+   5. LỊCH SỬ
    ============================================================ */
 async function renderAdminHistory() {
   const s = getSession(); if (!s) return;
@@ -595,13 +721,13 @@ async function renderAdminHistory() {
 }
 
 /* ============================================================
-   7. HELPERS
+   6. HELPERS
    ============================================================ */
 function fileToBase64(file) {
   return new Promise((resolve) => {
     if (!file) return resolve('');
     if (file.size > 3 * 1024 * 1024) {
-      alert('⚠️ Ảnh quá lớn (max 3MB). Vui lòng nén lại!');
+      alert('⚠️ Ảnh quá lớn (max 3MB). Nén lại rồi thử lại!');
       return resolve('');
     }
     const reader = new FileReader();
@@ -612,37 +738,36 @@ function fileToBase64(file) {
 }
 
 /* ============================================================
-   8. EXPOSE TO WINDOW
+   7. EXPOSE
    ============================================================ */
 window.openAdmin = openAdmin;
 window.switchAdminTab = switchAdminTab;
 
-// Pending
 window.renderAdminPending = renderAdminPending;
 window.approveDeposit = approveDeposit;
 window.rejectDeposit = rejectDeposit;
 
-// Users
 window.renderAdminUsers = renderAdminUsers;
 window.adminResetIP = adminResetIP;
 window.adminAdjustBalance = adminAdjustBalance;
 window.adminDeleteUser = adminDeleteUser;
 
-// Tools / Ports
 window.renderAdminTools = renderAdminTools;
 window.addNewTool = addNewTool;
 window.editTool = editTool;
 window.toggleTool = toggleTool;
 window.deleteTool = deleteTool;
 window.saveSiteConfig = saveSiteConfig;
+window.clearLogo = clearLogo;
+window.clearAvatar = clearAvatar;
+window.clearQR = clearQR;
+window.clearMusic = clearMusic;
+window.testMusic = testMusic;
 
-// Keys
 window.renderAdminKeys = renderAdminKeys;
 window.adminGenKeys = adminGenKeys;
 window.adminDelKey = adminDelKey;
 
-// History
 window.renderAdminHistory = renderAdminHistory;
 
-// Helper
 window.fileToBase64 = fileToBase64;

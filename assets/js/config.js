@@ -3,7 +3,7 @@
    ============================================================ */
 
 window.CONFIG = {
-  API_BASE: 'https://toolkiemlua2026.site/api',
+  API_BASE: '/api',
   API_TIMEOUT: 15000,
 
   /* ==================== SITE ==================== */

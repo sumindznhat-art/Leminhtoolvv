@@ -1,6 +1,6 @@
 /* ============================================================
-   ADMIN.JS — HOÀN CHỈNH
-   Duyệt tiền • Users • Tools • Config (Ảnh/QR/Logo/Nhạc) • Keys
+   ADMIN.JS — HOÀN CHỈNH 100%
+   Duyệt tiền • Users • Tools • Cấu hình (Ảnh/QR/Logo/Nhạc) • Keys
    ============================================================ */
 
 /* ==================== MỞ ADMIN PANEL ==================== */
@@ -27,19 +27,14 @@ async function openAdmin() {
       renderAdminKeys(),
       renderAdminHistory()
     ]);
-  } catch(e) {
-    console.error('Admin load error:', e);
-  }
+  } catch(e) { console.error('Admin load error:', e); }
 }
 
 function switchAdminTab(t) {
   document.querySelectorAll('.admin-tab').forEach(x => x.classList.toggle('active', x.dataset.atab === t));
   const map = {
-    pending: 'adminPendingView',
-    users: 'adminUsersView',
-    tools: 'adminToolsView',
-    keys: 'adminKeysView',
-    history: 'adminHistoryView'
+    pending: 'adminPendingView', users: 'adminUsersView', tools: 'adminToolsView',
+    keys: 'adminKeysView', history: 'adminHistoryView'
   };
   Object.values(map).forEach(id => {
     const el = document.getElementById(id);
@@ -47,6 +42,50 @@ function switchAdminTab(t) {
   });
   const target = document.getElementById(map[t]);
   if (target) target.style.display = '';
+}
+
+/* ============================================================
+   NÉN ẢNH TRƯỚC KHI UPLOAD — FIX LỖI "string did not match"
+   ============================================================ */
+function fileToBase64(file, maxSize = 800, quality = 0.8) {
+  return new Promise((resolve) => {
+    if (!file) return resolve('');
+    if (!file.type.startsWith('image/')) {
+      alert('⚠️ File không phải ảnh!');
+      return resolve('');
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        let w = img.width, h = img.height;
+        if (w > maxSize || h > maxSize) {
+          if (w > h) { h = Math.round(h * maxSize / w); w = maxSize; }
+          else { w = Math.round(w * maxSize / h); h = maxSize; }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        let result = canvas.toDataURL('image/jpeg', quality);
+
+        if (result.length > 1024 * 1024) result = canvas.toDataURL('image/jpeg', 0.6);
+        if (result.length > 1024 * 1024) {
+          const c2 = document.createElement('canvas');
+          c2.width = Math.round(w * 0.6);
+          c2.height = Math.round(h * 0.6);
+          c2.getContext('2d').drawImage(img, 0, 0, c2.width, c2.height);
+          result = c2.toDataURL('image/jpeg', 0.7);
+        }
+        console.log('📸 Nén ảnh:', file.name, '→', Math.round(result.length/1024) + 'KB');
+        resolve(result);
+      };
+      img.onerror = () => { alert('❌ Không đọc được file ảnh!'); resolve(''); };
+      img.src = e.target.result;
+    };
+    reader.onerror = () => { alert('❌ Lỗi đọc file!'); resolve(''); };
+    reader.readAsDataURL(file);
+  });
 }
 
 /* ============================================================
@@ -111,7 +150,7 @@ async function rejectDeposit(id) {
 }
 
 /* ============================================================
-   2. QUẢN LÝ USERS
+   2. QUẢN LÝ USERS + CẤP TIỀN QUA SERVER
    ============================================================ */
 async function renderAdminUsers() {
   const s = getSession(); if (!s) return;
@@ -145,7 +184,7 @@ async function renderAdminUsers() {
         <div class="info">⏰ Hạn VIP: ${exp}</div>
         <div class="acts">
           <button class="b3" onclick="adminResetIP('${esc(u.email)}')">🔄 Reset IP</button>
-          <button class="b4" onclick="adminAdjustBalance('${esc(u.email)}', ${balance})">💵 Cộng/Trừ</button>
+          <button class="b4" onclick="adminAdjustBalance('${esc(u.email)}', ${balance})">💵 Cấp tiền</button>
           ${!isAdm ? `<button class="b5" onclick="adminDeleteUser('${esc(u.email)}')">🗑 Xoá</button>` : ''}
         </div>
       </div>`;
@@ -154,45 +193,92 @@ async function renderAdminUsers() {
 }
 
 async function adminResetIP(email) {
-  if (!confirm('Reset IP cho ' + email + '?')) return;
+  if (!confirm('Reset IP cho ' + email + '?\nUser sẽ phải đăng nhập lại và khoá vào IP mới.')) return;
   const s = getSession();
-  const res = await api('user_reset_ip', { email: s.email, password: s.password, user_email: email });
+  const res = await api('user_reset_ip', {
+    email: s.email, password: s.password,
+    target_email: email
+  });
   if (res && res.success) {
     alert('✅ Đã reset IP cho ' + email);
     await renderAdminUsers();
-  } else alert('❌ ' + ((res && res.error) || 'Lỗi'));
+  } else alert('❌ ' + ((res && res.error) || 'Lỗi reset IP'));
 }
 
+/* CẤP TIỀN — GỌI SERVER ĐỂ LƯU DB */
 async function adminAdjustBalance(email, currentBal) {
-  const val = prompt(`Số dư hiện tại: ${fmt(currentBal)}\n\nNhập số tiền muốn CỘNG (âm để trừ):`, '10000');
-  if (val === null) return;
-  const delta = Number(val);
-  if (isNaN(delta)) return alert('Số không hợp lệ');
+  const input = prompt(
+    `👤 User: ${email}\n💰 Số dư hiện tại: ${fmt(currentBal)}\n\n` +
+    `Nhập số tiền muốn CẤP (dùng dấu - để trừ):\n` +
+    `VD: 50000 (cộng 50k) hoặc -20000 (trừ 20k)`,
+    '10000'
+  );
+  if (input === null) return;
+
+  const delta = Number(input);
+  if (isNaN(delta) || delta === 0) {
+    return alert('⚠️ Số không hợp lệ!');
+  }
+
   const newBal = currentBal + delta;
+  if (newBal < 0) {
+    return alert('⚠️ Số dư sẽ âm sau khi trừ! Huỷ thao tác.');
+  }
+
+  if (!confirm(
+    `XÁC NHẬN CẤP TIỀN\n\n` +
+    `👤 User: ${email}\n` +
+    `💰 Số dư cũ: ${fmt(currentBal)}\n` +
+    `➕ Thay đổi: ${delta > 0 ? '+' : ''}${fmt(delta)}\n` +
+    `💰 Số dư mới: ${fmt(newBal)}`
+  )) return;
 
   const s = getSession();
-  const res = await api('user_update', {
+
+  /* Gọi API update_balance — Backend cần xử lý action này */
+  const res = await api('admin_set_balance', {
     email: s.email, password: s.password,
-    user_email: email, balance: newBal
+    target_email: email,
+    amount: delta,
+    new_balance: newBal
   });
-  if (res && res.success) {
-    alert('✅ Đã cập nhật số dư: ' + fmt(newBal));
-    await renderAdminUsers();
-  } else alert('❌ ' + ((res && res.error) || 'Lỗi'));
+
+  /* Nếu API chưa có → thử fallback qua user_update */
+  if (!res || !res.success) {
+    const res2 = await api('user_update', {
+      email: s.email, password: s.password,
+      target_email: email,
+      balance: newBal
+    });
+
+    if (res2 && res2.success) {
+      alert('✅ ĐÃ CẤP TIỀN!\n\n👤 ' + email + '\n💰 Số dư mới: ' + fmt(newBal) + '\n\n⚠️ User cần đăng nhập lại để thấy số dư mới.');
+      await renderAdminUsers();
+      return;
+    }
+    alert('❌ ' + ((res2 && res2.error) || (res && res.error) || 'Lỗi server'));
+    return;
+  }
+
+  alert('✅ ĐÃ CẤP TIỀN!\n\n👤 ' + email + '\n💰 Số dư mới: ' + fmt(res.new_balance || newBal));
+  await renderAdminUsers();
 }
 
 async function adminDeleteUser(email) {
-  if (!confirm('⚠️ XOÁ VĨNH VIỄN user ' + email + '?')) return;
+  if (!confirm('⚠️ XOÁ VĨNH VIỄN user ' + email + '?\nKhông thể hoàn tác!')) return;
   const s = getSession();
-  const res = await api('user_delete', { email: s.email, password: s.password, user_email: email });
+  const res = await api('user_delete', {
+    email: s.email, password: s.password,
+    target_email: email
+  });
   if (res && res.success) {
     alert('✅ Đã xoá user');
     await renderAdminUsers();
-  } else alert('❌ ' + ((res && res.error) || 'Lỗi'));
+  } else alert('❌ ' + ((res && res.error) || 'Lỗi xoá user'));
 }
 
 /* ============================================================
-   3. QUẢN LÝ TOOLS + CẤU HÌNH (ẢNH/QR/LOGO/NHẠC)
+   3. TOOLS + CẤU HÌNH (Ảnh/QR/Logo/Nhạc)
    ============================================================ */
 async function renderAdminTools() {
   const el = document.getElementById('adminToolsView'); if (!el) return;
@@ -200,14 +286,14 @@ async function renderAdminTools() {
   const bank = window.CONFIG.bank || {};
   const logo = window.CONFIG.logo || '';
   const avatar = window.CONFIG.avatar || '';
+  const musicUrl = window.CONFIG.music_url || '';
 
   let html = `
-    <!-- ============ CẤU HÌNH CHUNG ============ -->
     <div class="adm-section" style="border-color:#93c5fd;background:#eff6ff">
       <h4>⚙️ CẤU HÌNH CHUNG</h4>
 
       <label style="font-size:11px;font-weight:700">🌐 API Base URL</label>
-      <input class="adm-input" id="cfgApiBase" value="${esc(window.CONFIG.API_BASE || '/api')}" placeholder="VD: /api hoặc https://domain.com/api">
+      <input class="adm-input" id="cfgApiBase" value="${esc(window.CONFIG.API_BASE || '/api')}" placeholder="VD: /api">
 
       <label style="font-size:11px;font-weight:700">📝 Tên Site</label>
       <input class="adm-input" id="cfgSiteName" value="${esc(window.CONFIG.site_name || '')}">
@@ -215,7 +301,7 @@ async function renderAdminTools() {
       <label style="font-size:11px;font-weight:700">📄 Mô tả</label>
       <input class="adm-input" id="cfgSiteDesc" value="${esc(window.CONFIG.site_desc || '')}">
 
-      <label style="font-size:11px;font-weight:700">📢 Chữ chạy</label>
+      <label style="font-size:11px;font-weight:700">📢 Chữ chạy (Marquee)</label>
       <input class="adm-input" id="cfgMarquee" value="${esc(window.CONFIG.marquee || '')}">
 
       <label style="font-size:11px;font-weight:700">© Footer</label>
@@ -225,13 +311,13 @@ async function renderAdminTools() {
       <div style="background:#fff;border-radius:10px;padding:10px;margin-top:10px;border:1px solid #bfdbfe">
         <div style="font-size:12px;font-weight:800;color:#1e40af;margin-bottom:8px">🖼️ ẢNH LOGO</div>
         <div style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">
-          <div id="cfgLogoPreview" style="width:70px;height:70px;border-radius:50%;background:#f1f5f9;display:flex;align-items:center;justify-content:center;overflow:hidden;border:2px solid #cbd5e1;flex-shrink:0;font-size:28px">
+          <div style="width:70px;height:70px;border-radius:50%;background:#f1f5f9;display:flex;align-items:center;justify-content:center;overflow:hidden;border:2px solid #cbd5e1;flex-shrink:0;font-size:28px">
             ${logo ? `<img src="${logo}" style="width:100%;height:100%;object-fit:cover">` : '🎀'}
           </div>
           <div style="flex:1;min-width:180px">
             <label style="font-size:10px;font-weight:700;display:block;margin-bottom:3px">📤 Upload file</label>
             <input type="file" id="cfgLogoFile" accept="image/*" class="adm-input" style="padding:5px;margin-bottom:5px;font-size:11px">
-            <label style="font-size:10px;font-weight:700;display:block;margin-bottom:3px">🔗 Hoặc dán URL</label>
+            <label style="font-size:10px;font-weight:700;display:block;margin-bottom:3px">🔗 Hoặc dán URL ảnh</label>
             <input class="adm-input" id="cfgLogoUrl" value="${logo && !logo.startsWith('data:') ? esc(logo) : ''}" placeholder="https://.../logo.png" style="font-size:11px">
             <button class="adm-btn" style="padding:5px;font-size:10px;margin-top:5px;background:#ef4444" onclick="clearLogo()">🗑 Xoá logo</button>
           </div>
@@ -242,13 +328,13 @@ async function renderAdminTools() {
       <div style="background:#fff;border-radius:10px;padding:10px;margin-top:10px;border:1px solid #bfdbfe">
         <div style="font-size:12px;font-weight:800;color:#1e40af;margin-bottom:8px">👤 AVATAR MẶC ĐỊNH</div>
         <div style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">
-          <div id="cfgAvatarPreview" style="width:70px;height:70px;border-radius:50%;background:#f1f5f9;display:flex;align-items:center;justify-content:center;overflow:hidden;border:2px solid #cbd5e1;flex-shrink:0;font-size:28px">
+          <div style="width:70px;height:70px;border-radius:50%;background:#f1f5f9;display:flex;align-items:center;justify-content:center;overflow:hidden;border:2px solid #cbd5e1;flex-shrink:0;font-size:28px">
             ${avatar ? `<img src="${avatar}" style="width:100%;height:100%;object-fit:cover">` : '🎀'}
           </div>
           <div style="flex:1;min-width:180px">
             <label style="font-size:10px;font-weight:700;display:block;margin-bottom:3px">📤 Upload file</label>
             <input type="file" id="cfgAvatarFile" accept="image/*" class="adm-input" style="padding:5px;margin-bottom:5px;font-size:11px">
-            <label style="font-size:10px;font-weight:700;display:block;margin-bottom:3px">🔗 Hoặc dán URL</label>
+            <label style="font-size:10px;font-weight:700;display:block;margin-bottom:3px">🔗 Hoặc dán URL ảnh</label>
             <input class="adm-input" id="cfgAvatarUrl" value="${avatar && !avatar.startsWith('data:') ? esc(avatar) : ''}" placeholder="https://.../avatar.png" style="font-size:11px">
             <button class="adm-btn" style="padding:5px;font-size:10px;margin-top:5px;background:#ef4444" onclick="clearAvatar()">🗑 Xoá avatar</button>
           </div>
@@ -259,11 +345,13 @@ async function renderAdminTools() {
       <div style="background:#fff;border-radius:10px;padding:10px;margin-top:10px;border:1px solid #bfdbfe">
         <div style="font-size:12px;font-weight:800;color:#1e40af;margin-bottom:8px">🎵 NHẠC NỀN</div>
         <label style="font-size:10px;font-weight:700;display:block;margin-bottom:3px">🔗 URL file nhạc (.mp3)</label>
-        <input class="adm-input" id="cfgMusicUrl" value="${esc(window.CONFIG.music_url || '')}" placeholder="https://.../music.mp3">
+        <input class="adm-input" id="cfgMusicUrl" value="${esc(musicUrl)}" placeholder="https://.../music.mp3">
         <div style="display:flex;gap:6px;margin-top:6px">
-          <button class="adm-btn" style="padding:6px;font-size:11px;background:linear-gradient(135deg,#10b981,#059669);flex:1" onclick="testMusic()">▶️ Nghe thử</button>
-          <button class="adm-btn" style="padding:6px;font-size:11px;background:#ef4444;flex:1" onclick="clearMusic()">🗑 Xoá nhạc</button>
+          <button class="adm-btn" style="padding:8px;font-size:11px;background:linear-gradient(135deg,#10b981,#059669);flex:1;margin:0" onclick="testMusic()">▶️ Nghe thử</button>
+          <button class="adm-btn" style="padding:8px;font-size:11px;background:#f59e0b;flex:1;margin:0" onclick="stopMusic()">⏸ Dừng</button>
+          <button class="adm-btn" style="padding:8px;font-size:11px;background:#ef4444;flex:1;margin:0" onclick="clearMusic()">🗑 Xoá</button>
         </div>
+        <div id="musicStatus" style="font-size:11px;color:#64748b;margin-top:6px;text-align:center"></div>
       </div>
 
       <!-- NGÂN HÀNG + QR -->
@@ -277,7 +365,7 @@ async function renderAdminTools() {
         <input class="adm-input" id="cfgBankOwner" value="${esc(bank.owner || '')}">
 
         <div style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap;margin-top:8px">
-          <div id="cfgQRPreview" style="width:90px;height:90px;border-radius:8px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;overflow:hidden;border:2px solid #cbd5e1;flex-shrink:0;font-size:28px">
+          <div style="width:90px;height:90px;border-radius:8px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;overflow:hidden;border:2px solid #cbd5e1;flex-shrink:0;font-size:28px">
             ${bank.qr ? `<img src="${bank.qr}" style="width:100%;height:100%;object-fit:contain">` : '📱'}
           </div>
           <div style="flex:1;min-width:180px">
@@ -293,7 +381,7 @@ async function renderAdminTools() {
       <button class="adm-btn" style="background:linear-gradient(135deg,#22c55e,#16a34a);margin-top:12px;padding:14px;font-size:14px" onclick="saveSiteConfig()">💾 LƯU TOÀN BỘ CẤU HÌNH</button>
     </div>
 
-    <!-- ============ THÊM TOOL MỚI ============ -->
+    <!-- THÊM TOOL -->
     <div class="adm-section">
       <h4>➕ THÊM GAME / TOOL MỚI</h4>
       <label style="font-size:11px;font-weight:700">Tên tool *</label>
@@ -373,7 +461,7 @@ async function renderAdminTools() {
 }
 
 /* ============================================================
-   LƯU CẤU HÌNH TOÀN BỘ
+   LƯU CẤU HÌNH (bao gồm nhạc, ảnh)
    ============================================================ */
 async function saveSiteConfig() {
   const val = id => {
@@ -392,7 +480,8 @@ async function saveSiteConfig() {
   /* Logo */
   const logoFile = document.getElementById('cfgLogoFile').files[0];
   if (logoFile) {
-    const b64 = await fileToBase64(logoFile);
+    console.log('⏳ Đang nén logo...');
+    const b64 = await fileToBase64(logoFile, 300, 0.85);
     if (b64) window.CONFIG.logo = b64;
   } else {
     const logoUrl = val('cfgLogoUrl');
@@ -402,14 +491,15 @@ async function saveSiteConfig() {
   /* Avatar */
   const avatarFile = document.getElementById('cfgAvatarFile').files[0];
   if (avatarFile) {
-    const b64 = await fileToBase64(avatarFile);
+    console.log('⏳ Đang nén avatar...');
+    const b64 = await fileToBase64(avatarFile, 300, 0.85);
     if (b64) window.CONFIG.avatar = b64;
   } else {
     const avatarUrl = val('cfgAvatarUrl');
     if (avatarUrl) window.CONFIG.avatar = avatarUrl;
   }
 
-  /* Music */
+  /* Nhạc */
   window.CONFIG.music_url = val('cfgMusicUrl');
 
   /* Bank */
@@ -421,28 +511,41 @@ async function saveSiteConfig() {
   /* QR */
   const qrFile = document.getElementById('cfgQRFile').files[0];
   if (qrFile) {
-    const b64 = await fileToBase64(qrFile);
+    console.log('⏳ Đang nén QR...');
+    const b64 = await fileToBase64(qrFile, 600, 0.85);
     if (b64) window.CONFIG.bank.qr = b64;
   } else {
     const qrUrl = val('cfgQRUrl');
     if (qrUrl) window.CONFIG.bank.qr = qrUrl;
   }
 
-  const res = await saveRemoteConfig();
-  if (res && res.success) {
-    alert('✅ ĐÃ LƯU TOÀN BỘ CẤU HÌNH!');
-    if (typeof applyLoginBranding === 'function') applyLoginBranding();
-    if (typeof buildBankInfo === 'function') buildBankInfo();
-    if (typeof applyMusic === 'function') applyMusic();
-    if (typeof applyDefaultAvatar === 'function') applyDefaultAvatar();
-    renderAdminTools();
-  } else {
-    alert('❌ ' + ((res && res.error) || 'Lỗi lưu cấu hình'));
+  /* Kiểm tra kích thước config */
+  const sizeKB = Math.round(JSON.stringify(window.CONFIG).length / 1024);
+  console.log('📦 Config size:', sizeKB + 'KB');
+  if (sizeKB > 1500) {
+    return alert('⚠️ Config quá lớn (' + sizeKB + 'KB). Vui lòng dùng ảnh nhỏ hơn hoặc dán URL thay vì upload!');
+  }
+
+  /* Gửi lên server */
+  try {
+    const res = await saveRemoteConfig();
+    if (res && res.success) {
+      alert('✅ ĐÃ LƯU TOÀN BỘ CẤU HÌNH!');
+      if (typeof applyLoginBranding === 'function') applyLoginBranding();
+      if (typeof buildBankInfo === 'function') buildBankInfo();
+      if (typeof applyMusic === 'function') applyMusic();
+      if (typeof applyDefaultAvatar === 'function') applyDefaultAvatar();
+      renderAdminTools();
+    } else {
+      alert('❌ ' + ((res && res.error) || 'Lỗi lưu cấu hình'));
+    }
+  } catch(e) {
+    alert('❌ Lỗi: ' + e.message);
   }
 }
 
 /* ============================================================
-   XOÁ ẢNH / NHẠC / QR
+   XOÁ ẢNH / NHẠC
    ============================================================ */
 async function clearLogo() {
   if (!confirm('Xoá logo?')) return;
@@ -456,7 +559,7 @@ async function clearLogo() {
 }
 
 async function clearAvatar() {
-  if (!confirm('Xoá avatar mặc định?')) return;
+  if (!confirm('Xoá avatar?')) return;
   window.CONFIG.avatar = '';
   const res = await saveRemoteConfig();
   if (res && res.success) {
@@ -467,7 +570,7 @@ async function clearAvatar() {
 }
 
 async function clearQR() {
-  if (!confirm('Xoá QR ngân hàng?')) return;
+  if (!confirm('Xoá QR?')) return;
   window.CONFIG.bank = window.CONFIG.bank || {};
   window.CONFIG.bank.qr = '';
   const res = await saveRemoteConfig();
@@ -480,6 +583,7 @@ async function clearQR() {
 
 async function clearMusic() {
   if (!confirm('Xoá nhạc nền?')) return;
+  stopMusic();
   window.CONFIG.music_url = '';
   const res = await saveRemoteConfig();
   if (res && res.success) {
@@ -490,21 +594,66 @@ async function clearMusic() {
 }
 
 /* ============================================================
-   TEST NHẠC
+   TEST NHẠC — NGHE THỬ
    ============================================================ */
+let _testAudio = null;
+
 function testMusic() {
   const url = (document.getElementById('cfgMusicUrl') || {}).value?.trim();
-  if (!url) return alert('Chưa nhập URL nhạc!');
-  const audio = new Audio(url);
-  audio.volume = 0.5;
-  audio.play()
+  if (!url) return alert('⚠️ Chưa nhập URL nhạc!');
+
+  const status = document.getElementById('musicStatus');
+  if (status) status.textContent = '⏳ Đang tải nhạc...';
+
+  /* Dừng nhạc cũ */
+  if (_testAudio) {
+    _testAudio.pause();
+    _testAudio = null;
+  }
+
+  _testAudio = new Audio(url);
+  _testAudio.volume = 0.5;
+  _testAudio.loop = true;
+
+  _testAudio.oncanplay = () => {
+    if (status) status.textContent = '✅ Nhạc hợp lệ! Đang phát thử...';
+  };
+
+  _testAudio.onerror = () => {
+    if (status) status.textContent = '❌ Không tải được nhạc!';
+    alert('❌ Không phát được nhạc!\n\n' +
+          'URL: ' + url + '\n\n' +
+          'Kiểm tra:\n' +
+          '• URL có đúng file .mp3 không?\n' +
+          '• Link có cho phép truy cập không?\n' +
+          '• Đã bật CORS chưa?');
+  };
+
+  _testAudio.play()
     .then(() => {
-      alert('▶️ Đang phát thử nhạc (10 giây)...');
-      setTimeout(() => { audio.pause(); audio.currentTime = 0; }, 10000);
+      if (status) status.textContent = '▶️ Đang phát nhạc thử...';
+      /* Tự dừng sau 20s */
+      setTimeout(() => {
+        if (_testAudio) {
+          _testAudio.pause();
+          if (status) status.textContent = '⏸ Đã dừng test nhạc';
+        }
+      }, 20000);
     })
     .catch(e => {
-      alert('❌ Không phát được nhạc!\n\n' + e.message);
+      if (status) status.textContent = '❌ Lỗi phát nhạc';
+      alert('❌ Không phát được nhạc!\n' + e.message);
     });
+}
+
+function stopMusic() {
+  if (_testAudio) {
+    _testAudio.pause();
+    _testAudio.currentTime = 0;
+    _testAudio = null;
+  }
+  const status = document.getElementById('musicStatus');
+  if (status) status.textContent = '⏸ Đã dừng';
 }
 
 /* ============================================================
@@ -522,7 +671,7 @@ async function addNewTool() {
 
   let image = '';
   const f = document.getElementById('ntImage').files[0];
-  if (f) image = await fileToBase64(f);
+  if (f) image = await fileToBase64(f, 200, 0.85);
 
   const slug = name.toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
@@ -563,7 +712,7 @@ async function editTool(idx) {
   const name = prompt('Tên tool:', t.name); if (name === null) return;
   const gameUrl = prompt('URL Game:', t.game_url || ''); if (gameUrl === null) return;
   const apiUrl = prompt('API URL:', t.api_url || ''); if (apiUrl === null) return;
-  const sortStr = prompt('Thứ tự (sort):', t.sort || 99); if (sortStr === null) return;
+  const sortStr = prompt('Thứ tự:', t.sort || 99); if (sortStr === null) return;
 
   const old = { name: t.name, game_url: t.game_url, api_url: t.api_url, sort: t.sort };
   t.name = name.trim() || t.name;
@@ -586,7 +735,6 @@ async function toggleTool(idx, field) {
   const t = window.CONFIG.ports[idx];
   if (!t) return;
   t[field] = t[field] ? 0 : 1;
-
   const res = await saveRemoteConfig();
   if (res && res.success) {
     renderAdminTools();
@@ -602,7 +750,6 @@ async function deleteTool(idx) {
   const t = window.CONFIG.ports[idx];
   if (!t) return;
   if (!confirm('🗑 Xoá tool "' + t.name + '"?')) return;
-
   const removed = window.CONFIG.ports.splice(idx, 1)[0];
   const res = await saveRemoteConfig();
   if (res && res.success) {
@@ -653,7 +800,6 @@ async function renderAdminKeys() {
           </div>
           <div class="info">⏱ ${k.days} ngày</div>
           ${k.used_by ? `<div class="info">👤 ${esc(k.used_by)}</div>` : ''}
-          ${k.used_at ? `<div class="info" style="font-size:11px;color:#94a3b8">🕐 ${new Date(Number(k.used_at)).toLocaleString('vi-VN')}</div>` : ''}
           <div class="acts">
             <button class="b5" onclick="adminDelKey('${esc(k.code)}')">🗑 Xoá</button>
           </div>
@@ -667,9 +813,7 @@ async function adminGenKeys() {
   const days = parseInt(document.getElementById('keyDays').value) || 30;
   const qty = Math.min(100, Math.max(1, parseInt(document.getElementById('keyQty').value) || 1));
   const note = document.getElementById('keyNote').value.trim();
-
   if (!confirm(`Tạo ${qty} key loại ${days} ngày?`)) return;
-
   const s = getSession();
   const res = await api('key_create', { email: s.email, password: s.password, days, qty, note });
   if (res && res.success) {
@@ -703,8 +847,7 @@ async function renderAdminHistory() {
     return;
   }
 
-  let html = `<p style="text-align:center;font-size:12px;color:#64748b;margin-bottom:8px">Hiển thị <b>${Math.min(hist.length, 100)}</b> / ${hist.length} giao dịch</p>`;
-
+  let html = `<p style="text-align:center;font-size:12px;color:#64748b;margin-bottom:8px">Hiển thị ${Math.min(hist.length, 100)} / ${hist.length}</p>`;
   hist.slice(0, 100).forEach(h => {
     const amt = Number(h.amount) || 0;
     const color = amt > 0 ? '#16a34a' : (amt < 0 ? '#dc2626' : '#3b5bfd');
@@ -721,37 +864,17 @@ async function renderAdminHistory() {
 }
 
 /* ============================================================
-   6. HELPERS
-   ============================================================ */
-function fileToBase64(file) {
-  return new Promise((resolve) => {
-    if (!file) return resolve('');
-    if (file.size > 3 * 1024 * 1024) {
-      alert('⚠️ Ảnh quá lớn (max 3MB). Nén lại rồi thử lại!');
-      return resolve('');
-    }
-    const reader = new FileReader();
-    reader.onload = e => resolve(e.target.result);
-    reader.onerror = () => resolve('');
-    reader.readAsDataURL(file);
-  });
-}
-
-/* ============================================================
-   7. EXPOSE
+   EXPOSE
    ============================================================ */
 window.openAdmin = openAdmin;
 window.switchAdminTab = switchAdminTab;
-
 window.renderAdminPending = renderAdminPending;
 window.approveDeposit = approveDeposit;
 window.rejectDeposit = rejectDeposit;
-
 window.renderAdminUsers = renderAdminUsers;
 window.adminResetIP = adminResetIP;
 window.adminAdjustBalance = adminAdjustBalance;
 window.adminDeleteUser = adminDeleteUser;
-
 window.renderAdminTools = renderAdminTools;
 window.addNewTool = addNewTool;
 window.editTool = editTool;
@@ -763,11 +886,9 @@ window.clearAvatar = clearAvatar;
 window.clearQR = clearQR;
 window.clearMusic = clearMusic;
 window.testMusic = testMusic;
-
+window.stopMusic = stopMusic;
 window.renderAdminKeys = renderAdminKeys;
 window.adminGenKeys = adminGenKeys;
 window.adminDelKey = adminDelKey;
-
 window.renderAdminHistory = renderAdminHistory;
-
 window.fileToBase64 = fileToBase64;
